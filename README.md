@@ -1,8 +1,6 @@
 # Automated Behavioral Scientific Research on AI Agents
 
 [![Paper](https://img.shields.io/badge/arXiv-2608.10030-b31b1b.svg)](https://arxiv.org/abs/2608.10030)
-![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue.svg)
-![Package](https://img.shields.io/badge/package-aerobat%201.0.0-4c1.svg)
 ![Analysis](https://img.shields.io/badge/analysis-notebooks%20reproducible-6a5acd.svg)
 ![Repository](https://img.shields.io/badge/repository-official-111.svg)
 
