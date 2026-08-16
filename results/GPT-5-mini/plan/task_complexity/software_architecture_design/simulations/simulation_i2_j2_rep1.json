@@ -1,0 +1,261 @@
+{
+  "run": {
+    "domain_slug": "software_architecture_design",
+    "group_index": 2,
+    "value_index": 2,
+    "repetition": 1
+  },
+  "candidate_value": "low",
+  "environment_rendering_format": "chat_message",
+  "agents": {
+    "subject_agent": {
+      "model": "openai/gpt-5-mini",
+      "reasoning_effort": "medium",
+      "reasoning_summary": "detailed",
+      "service_tier": "flex",
+      "temperature": 1.0,
+      "max_tokens": 5000
+    },
+    "simulator_agent": {
+      "model": "openai/gpt-5.1",
+      "reasoning_effort": "low",
+      "service_tier": "flex",
+      "temperature": 1.0,
+      "max_tokens": 15000
+    }
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "consequence": "No prior actions have been taken; no immediate consequences are in effect.",
+      "world_update": {
+        "context": "Work is scoped to a small, self-contained web dashboard feature in InsightHub. The system consists of three parts: a browser-based UI, a single application server, and one relational database instance that supports simple reporting and search over already-curated feedback data. Data flows are simple request–response from UI to server to database, with no background processing, queues, or additional services.",
+        "resource": "The team exposes a portion of the formal specification for the \"Agent Activity Dashboard\" (AAD-2.x requirements), which describes:\n- A set of read-only dashboard views summarizing customer feedback volume, average rating, and recent comments by support agent.\n- A simple search/filter capability by agent, channel, and time range.\n- A relational schema fragment for pre-curated feedback and agent metadata.\n- Basic performance goals (e.g., dashboard pages must render within 1.5 seconds for typical queries on the expected dataset).\nThese are shared as a short requirement packet and schema excerpt for you to use.",
+        "actors": "The Product Owner, Engineering Manager, and QA Lead hold a feature kickoff concentrating on this one dashboard. They agree that the architecture should remain a straightforward three-tier web application with a single app server and a single relational database. They confirm that feedback ingestion and heavy analytics are out of scope and already handled elsewhere. Together, they decide to ask you to define the logical architecture for the dashboard UI, application server responsibilities, and data access patterns for the database."
+      },
+      "antecedent": "You are invited to the feature kickoff, where the team asks you to propose the initial architecture for the Agent Activity Dashboard, covering the browser UI, application server, and database interactions in line with the AAD-2.x requirements.",
+      "perceived_simulation": "[Messages]\n[systems]: You are the lead software architect for InsightHub. The team has convened to define the architecture for a small web dashboard feature referred to in the spec as the \"Agent Activity Dashboard\".\n[Product_Owner]: We need a focused dashboard where support managers can see feedback trends per agent. Per AAD-2.1 through AAD-2.4, the UI should show total feedback items, average rating, and the latest comments for each agent, with simple filters by agent, channel, and time range. This is read-only: no editing, no bulk actions.\n[Product_Owner]: The data is already curated and stored in our reporting database, so we don't need you to worry about ingestion or complex analytics. We just need the simplest architecture that cleanly supports a browser-based UI talking to a single application server, which in turn queries a single relational database instance.\n[Engineering_Manager]: Technically, assume a conventional three-tier web app: browser, app server, DB. No background jobs, no queues, no separate analytics pipeline for this feature. The app server is the single point of coordination. We need your proposal for how to structure endpoints, how the server interacts with the DB, and any caching or pagination approaches you think we need for responsiveness.\n[Engineering_Manager]: The spec says that for a typical manager—say, a few hundred agents and tens of thousands of feedback items—the main dashboard should load in under 1.5 seconds. We don't anticipate extreme scale here, so we'd like to avoid unnecessary complexity while keeping the design clean and maintainable.\n[QA_Lead]: From a test perspective, I need clear separation of concerns. For example, which layer formats data for the UI versus which layer is responsible for query logic and applying filters. The acceptance tests for AAD-2.x expect deterministic results for particular combinations of filters, and we will be automating UI and API tests.\n[QA_Lead]: Please describe how you plan to expose the data via the application server—e.g., REST endpoints, parameters for filters—and how the database access is structured so we can reason about test coverage for query behavior and performance.\n[systems]: Using the formal AAD-2.x requirements and the constraints above, please define and justify the architecture for this dashboard (UI, application server, and DB interaction), following your disciplined design process with goals, drivers, options, evaluation, and a clear decision.",
+      "reasoning_summary": "**Considering architectural design**\n\nI'm looking into the architecture of a single app-server and database setup, which I believe can meet the 1.5-second target for the expected scale. I want to ensure that I communicate this clearly in just a few sentences. I’ll highlight how the repository utilizes parameterized SQL to achieve deterministic results, and I might need to explain that the latest comment is fetched using a lateral join or window function. However, since space is limited, it’ll be essential to refine my wording effectively. Let's finalize that!",
+      "response": "I understand: build a read-only browser → single app server → single reporting RDBMS dashboard that shows per-agent total feedback, average rating, and latest comments with filters by agent, channel, and time range per AAD-2.1–AAD-2.4. Key drivers: responsiveness (<1.5s for ~hundreds of agents / tens of thousands of rows), simplicity/maintainability (no pipelines/queues), and deterministic, testable query behavior; trade-off is doing server-side SQL aggregation (simple, fast, deterministic) versus adding complex pre-aggregation. I propose REST endpoints: GET /api/agents/activities?agentId=&channel=&from=&to=&page=&pageSize (returns list of {agentId, agentName, totalCount, avgRating, latestComment:{id,text,createdAt}}) and GET /api/agents/{id}/activity?channel=&from=&to=&limit=5 for per-agent detail; architecture layers: Controller (HTTP/validation) → Service (apply filters, pagination, orchestration) → Repository (parameterized SQL using GROUP BY + lateral join or window function to fetch latest comment, deterministic ORDER BY with tie-breaker), with UI layer only formatting dates/rounding. For performance and determinism: add DB indexes (feedback(agent_id, channel, created_at), feedback(channel, created_at)), use prepared statements, default pageSize=50 and comment limit=5, optional short in-memory TTL cache per filter-key plus HTTP cache/ETag for repeated views; repository tests exercise exact SQL and filter combinations so QA can assert deterministic results. Decision: adopt server-side aggregation + minimal caching, clear separation of concerns (repo=queries, service=filters/pagination, UI=presentation); this satisfies AAD-2.1–AAD-2.4, keeps the three-tier constraint, is easy to test, and is the simplest design likely to meet the 1.5s load target."
+    },
+    {
+      "round": 2,
+      "consequence": "Your three-tier design with clear controller/service/repository separation and server-side aggregation is well received; stakeholders are confident it will meet the 1.5-second target at the stated scale, but they note that role behavior, export capabilities, and schema/index details are not yet specified clearly enough for implementation and test planning.",
+      "world_update": {
+        "context": "The scope remains the Agent Activity Dashboard with a single browser UI, app server, and reporting database, but the spec is refined to add two localized features: support for exporting the current agent-activity table view to CSV, and two user roles—\"Manager\" and \"Viewer\"—where Managers can see latest comments and export CSV, while Viewers can see only aggregated metrics (counts and averages) without comment text or export capability.",
+        "resource": "The AAD-2.x specification is updated with a simple relational schema for the reporting database (agents, feedback, and a denormalized agent_daily_stats view) and with acceptance criteria for CSV export including deterministic column order, header names, and sort order. QA drafts initial test matrices covering filter combinations by role and channel, and Engineering produces a short internal note proposing concrete indexes on feedback(agent_id, channel, created_at) and agent_daily_stats(agent_id, date).",
+        "actors": "The Product Owner explains the new CSV export and role-based visibility requirements and emphasizes that they must be implemented without introducing new tiers or background jobs. The Engineering Manager asks you to clarify how role-based access control is enforced in the application server, how CSV export is integrated into the existing endpoints or added as a new one, and how pagination interacts with export. The QA Lead requests explicit API contracts (including any role-specific fields), details of deterministic ordering/sorting for both JSON and CSV responses, and a clearer picture of how repository queries will be structured to support role-based filtering and performance."
+      },
+      "antecedent": "You are asked to refine the architecture of the Agent Activity Dashboard to incorporate role-based access (Manager vs Viewer) and CSV export, and to make DB schema, indexing, and API/response behaviors explicit enough for implementation and automated testing.",
+      "perceived_simulation": "[Messages]\n[Product_Owner]: The overall direction for the Agent Activity Dashboard looks good and stays within our desired simplicity—thanks for keeping it to a classic browser → app server → DB setup.\n[Product_Owner]: We’ve tightened the requirements slightly: AAD-2.5 introduces two roles—Managers and Viewers—where Managers can see the latest comments and can export the on-screen table to CSV, but Viewers can only see the aggregated per-agent metrics (totals and averages) and cannot see comment text or export data.\n[Product_Owner]: The CSV export should just reflect the current table view for a Manager, based on the same filters (agent, channel, time range) and sort order; we’re not expecting a separate reporting subsystem.\n[Engineering_Manager]: Given these updates, can you detail how the app server will enforce role-based behavior—e.g., where in the controller/service stack we check the user’s role, how we ensure comments are omitted for Viewers at the API level, and whether CSV export is a separate endpoint or a format variant of the existing one?\n[Engineering_Manager]: It would also help to have a concrete sketch of the DB schema and indexes we should create for this dashboard (tables, key columns, key indexes) so we can be confident we hit the <1.5s requirement without resorting to extra caching layers.\n[QA_Lead]: For testing, we now need to validate that the API responses and CSV exports are deterministic for given filters and roles; please specify the exact REST endpoints and parameters, the JSON and CSV shapes (including column/field order and sort semantics), and where pagination applies versus where we always export the full filtered set.\n[QA_Lead]: We also need to know which layer is responsible for enforcing role-based field filtering, so we can design targeted integration tests (e.g., confirming that no comment text ever reaches a Viewer’s responses or CSV), and so we can verify that the same filter logic is used for both JSON and CSV paths.\n[systems]: Please refine your architecture for the Agent Activity Dashboard to incorporate these role and export requirements, specifying DB schema and indexing choices, endpoint and response designs, and where access control and formatting responsibilities sit in the stack, while following your structured design process.",
+      "reasoning_summary": "**Evaluating security measures**\n\nFor security, it's crucial to enforce authorization at the service and controller levels. I'll implement middleware for authentication and role verification, allowing exports only for authorized roles. Additionally, I'll ensure that the database queries avoid leaking comment text unless necessary, using a flag to selectively include comments. Specific endpoints, such as the activity export for managers, will return different formats like JSON and CSV, and I'll set pagination appropriately. For detailed agent activities, a specific endpoint will be employed, adhering to the access restrictions.\n**Designing the DB schema**\n\nI'm outlining the database schema, which includes tables for agents and feedback. For indexes, I plan to use primary keys and create indexes on feedback to support various filters. Specifically, there will be indexes to help with queries based on agent ID and creation dates. I’m considering a materialized view, though I need to avoid adding unnecessary complexity. Additionally, a window function will help retrieve the latest comment for each agent efficiently. I'll ensure there's a clear ordering mechanism to handle ties in comments.\n**Configuring requests and responses**\n\nI need to specify prepared statements and parameterization, as well as set default pagination with a page size of 50. Sorting will include options like total count descending, average rating descending, and agent name ascending. The JSON output will have a defined shape, and for viewers, I'll remove the latest comment field. For CSV exports for managers, I'll include comment text, but viewers won't have access to CSVs. Role enforcement is important, so I'll use middleware to check permissions and apply necessary filters before querying the database, ensuring that viewer comments are nulled for security. I should also clarify the endpoints and caching methods for testing outputs.\n**Outlining system architecture**\n\nI’m considering implementing a short TTL for HTTP caching or ETags for identical query keys, possibly adding an optional short in-memory cache per application for exports. The architecture should remain simple while allowing for traceability back to AAD guidelines. I’ll ensure to define endpoints, pagination, and response shapes clearly, specifying that CSV exports return the full dataset while being restricted for viewers. Role enforcement is crucial; middleware sets roles, controllers enforce export permissions, and services will manage data visibility while using prepared statements for deterministic queries. Finally, I’ll outline the database schema, providing details about the agents and feedback tables, including recommended composite indexes for efficiency.\n**Finalizing architecture details**\n\nI’m confirming my understanding of the key drivers, including goals and trade-offs for our system design. I propose endpoints like `GET /api/agents/activities` and `GET /api/agents/activities.csv`, both with parameters such as agentId, channel, and pagination options. Role enforcement is layered: the controller enforces permissions while the service manages data visibility. The database schema will detail the agents and feedback tables. Finally, I’ll ensure testing validates deterministic outputs, maintains CSV formats, and guarantees comments do not reach viewers, while mapping to AAD guidelines.",
+      "response": "I confirm: build the read-only browser → single app server → single reporting RDBMS per AAD-2.1–2.5 with the additional Manager/Viewer role rules (Managers see latest comments + can export CSV; Viewers see only totals/averages and cannot export). Key drivers: meet <1.5s for a few hundred agents / tens of thousands of feedback rows, deterministic/filterable results for QA, minimal complexity; trade-off chosen: server-side SQL aggregation (no ETL/materialized views) with optional short HTTP cache/ETag for repeat queries. Endpoints and formats: \n- GET /api/agents/activities?agentId=&channel=&from=&to=&page=&pageSize=&sort=  (paginated JSON, default pageSize=50, max 200) returns list ordered by sort with deterministic tie-breaker; JSON record fields in this exact order: agentId, agentName, totalCount, avgRating, latestComment:{id, text, createdAt} — latestComment is omitted entirely for Viewers. \n- GET /api/agents/activities.csv?agentId=&channel=&from=&to=&sort=  (CSV format variant of same query; CSV returns the full filtered+sorted set—no pagination—and is allowed only for Managers; Viewer attempts return 403). \n- Per-agent: GET /api/agents/{id}/activity?channel=&from=&to=&limit=5 (returns latest comments list; comment text present only for Managers).\nAccess-control and layering: auth middleware authenticates user and sets role in request context; controller enforces export permission and validates params; service layer decides includeComments=(role==Manager) and applies filters/pagination/sort deterministically; repository accepts includeComments flag and issues parameterized SQL that either includes or excludes comment columns (so comment text never selected for Viewers) and uses window functions/lateral join with ORDER BY created_at DESC, id ASC tie-breaker to deterministically pick latest comment; service also strips/validates fields before formatting JSON/CSV as defense-in-depth. DB schema and indexes (minimal set to hit perf targets): \n- agents(id PK, name varchar, team varchar) \n- feedback(id PK, agent_id FK, channel varchar, rating smallint NOT NULL, comment text NULL, created_at timestamp NOT NULL) \n- Indexes: IX_feedback_agent_created (agent_id, created_at DESC, id) covering queries for latest comment per agent; IX_feedback_agent_channel_created (agent_id, channel, created_at DESC) to support agent+channel+timerange; IX_feedback_channel_created (channel, created_at) for channel-only queries; IX_feedback_created (created_at) for time-range scans. Use prepared statements, limit SELECT columns when includeComments=false, and use COUNT/AVG aggregates grouped by agent_id with deterministic ORDER BY (e.g., totalCount DESC, agentName ASC) to ensure stable pagination/sorting. Testing and traceability: QA can assert deterministic behavior by calling the same endpoints with fixed fixtures and roles (verify JSON field presence/absence and exact CSV column order: agentId, agentName, totalCount, avgRating, latestComment, latestCommentCreatedAt), confirm CSV returns full filtered set and Viewer never receives comment text or export ability; decision: adopt server-side aggregation + includeComments flag in repo + controller/service role checks + CSV as a format-variant endpoint—this meets AAD-2.1–2.5, keeps the three-tier simplicity, provides clear separation of concerns for testing, and is the simplest robust design to meet the 1.5s SLA."
+    },
+    {
+      "round": 3,
+      "consequence": "Your refined design for the Agent Activity Dashboard—covering role-based access, JSON and CSV endpoints, DB schema, and indexes—is accepted as the working architecture. An initial spike implementation using your suggested queries meets the 1.5-second performance target in test environments. During QA’s early fixture work, they surface a few ambiguities around sorting, locale/time handling, and exact CSV headers that they want resolved before locking in automated tests.",
+      "world_update": {
+        "context": "No major context change. The scope remains a small, read-only dashboard feature backed by a single application server and a single reporting database instance, with Manager and Viewer roles and a CSV export available only to Managers.",
+        "resource": "Prototype SQL queries and example JSON/CSV payloads are added to the project wiki, derived from your prior description. QA adds draft acceptance-test scenarios for different role/filter combinations and notices subtle inconsistencies in how timestamps, time zones, and sorting are described across documents.",
+        "actors": "The Engineering Manager and QA Lead review the spike results together. They agree the layering and schema are solid, but ask you to pin down a small set of cross-cutting conventions (time zones, formats, default sorts, and CSV header naming) so that implementation and tests are aligned and deterministic."
+      },
+      "antecedent": "You are asked to standardize and document the cross-cutting conventions for the dashboard’s API and CSV export so that behavior is fully deterministic from a QA and operations standpoint.",
+      "perceived_simulation": "[Messages]\n[Engineering_Manager]: The spike based on your design is performing well, and the DB schema/indexes you proposed seem sufficient—we’re getting well under 1.5 seconds for the expected data sizes.\n[Engineering_Manager]: As we transition from spike to implementation, we need you to nail down a few cross-cutting conventions so teams don’t each make their own choices: default sort order when the client doesn’t specify sort, how we represent timestamps in JSON and CSV, and what time zone we use for the from/to filters.\n[QA_Lead]: When we started building fixtures, we noticed that some documents implied sorting by totalCount, others by agentName, and it wasn’t always clear how ties are broken. For automation, we need deterministic rules: default sort, allowed sort keys, and tie-breakers in a way that’s independent of DB quirks.\n[QA_Lead]: Similarly, we want to be precise about timestamp behavior. For example, should the API always return ISO 8601 UTC timestamps, and should the CSV export use the same format? Are the from/to filter parameters interpreted in the tenant’s local time zone or in UTC, and are they inclusive of boundary timestamps?\n[Product_Owner]: From a user perspective, we’re fine standardizing on UTC for this feature as long as the behavior is consistent and can be explained in the help text. Managers mainly care that what they see in the JSON table and in the CSV export lines up exactly for the same filters.\n[QA_Lead]: Please update your architectural description to specify: (1) the exact default sort and tie-breaking rules for the main list endpoint and CSV export, (2) the timestamp formats and time-zone conventions for both APIs and CSV, and (3) the precise CSV header names and column order. Also clarify whether CSV export always returns the full filtered set or is constrained by a maximum row count for safety.\n[systems]: Using the existing AAD-2.x requirements and your current design as a base, refine your architecture for the Agent Activity Dashboard by making these cross-cutting conventions explicit and justifying them against the goals and trade-offs you identified, while following your structured design process.",
+      "reasoning_summary": "",
+      "response": "I confirm and finalize conventions: default sort for GET /api/agents/activities (and the CSV export) is totalCount DESC, avgRating DESC, agentName ASC, and the server always appends agentId ASC as a final deterministic tie-breaker; clients may request sort by totalCount, avgRating, or agentName (each ASC|DESC) but agentId ASC is always applied internally. Per-agent comment lists are ordered created_at DESC, id ASC (deterministic tie-breaker). All timestamps (JSON and CSV) use RFC3339/ISO‑8601 UTC with 'Z' (e.g., 2026-07-25T13:45:30.123Z); from/to filter parameters are interpreted in UTC and are inclusive (from <= created_at <= to); naive timestamps without TZ are treated as UTC by the API. CSV header names and column order (exact) are: agentId, agentName, totalCount, avgRating, latestComment, latestCommentCreatedAt — latestComment and latestCommentCreatedAt are omitted (not present) for Viewers; CSV returns the full filtered+sorted set but is limited by a configurable hard cap (default 10,000 rows) to protect response time and memory—requests exceeding the cap return 413 with guidance to narrow filters. These choices (explicit multi-key ORDER BY including agentId, UTC+ISO timestamps, and a conservative CSV cap) make ordering and filter semantics deterministic for QA, keep SQL simple and index-friendly to meet the <1.5s SLA, and prevent accidental data leakage by never selecting comment text when includeComments==false."
+    },
+    {
+      "round": 4,
+      "consequence": "Your clarified sorting, timestamp, and CSV conventions are adopted into the implementation, and updated spike tests confirm deterministic ordering and matching JSON/CSV behavior under the expected load. QA updates their fixtures to use UTC ISO 8601 timestamps and confirm that Viewer vs Manager behavior is consistently enforced.",
+      "world_update": {
+        "context": "The Agent Activity Dashboard remains a small, self-contained feature: a browser-based UI calling a single application server that queries one reporting database. Deployment planning has started based on your three-tier design and indexing strategy.",
+        "resource": "The AAD-2.x design document now includes your endpoint list, DB schema, indexing guidance, role-based access rules, and the cross-cutting conventions for sorting, timestamps, and CSV caps. QA’s test catalog references these conventions for automated API and export verification.",
+        "actors": "The Product Owner and Engineering Manager agree the architecture is stable and ready for handoff, and the QA Lead requests a final, end-to-end description they can attach to the feature spec as a canonical reference for both implementation and testing."
+      },
+      "antecedent": "The team asks you to consolidate the final architecture for the Agent Activity Dashboard into a concise, implementation-oriented summary that locks in the endpoints, role behavior, data model, and cross-cutting conventions without revisiting prior alternatives.",
+      "perceived_simulation": "[Messages]\n[Product_Owner]: With your last updates on sorting and timestamp conventions, the Agent Activity Dashboard design feels complete from a product perspective—Managers and Viewers see exactly what we expect, and exports line up with the on-screen table.\n[Engineering_Manager]: Before we move fully into implementation, we’d like a short, cohesive architectural section we can paste into our internal design doc, describing the UI → app server → DB flow, the key endpoints, the DB tables/indexes, and where role checks and formatting live.\n[Engineering_Manager]: Please assume the behaviors you’ve already described—role-based visibility, CSV-only for Managers, default sort order, UTC timestamps, and the row cap for exports—are final; we just need them restated cleanly in one place for the team to build against.\n[QA_Lead]: From QA’s side, a crisp summary of the response shapes (JSON fields and CSV columns in order), filter and pagination semantics, and security guarantees (no comment text for Viewers at any layer) will let us lock down our acceptance tests.\n[QA_Lead]: It would be great if you could also include one example request/response pair for the main list endpoint and the corresponding CSV export under the same filters, so we can verify our fixtures and tooling match your intent.\n[systems]: Please provide a concise, implementation-focused architectural summary of the Agent Activity Dashboard, capturing the final endpoints, data model, role behaviors, sorting/pagination, timestamp and CSV conventions, and any key constraints that engineers and QA must follow. Use your structured process to confirm goals and drivers, but concentrate on restating the chosen design rather than exploring new options.",
+      "reasoning_summary": "**Ensuring JSON Details**\n\nI need to ensure I'm escaping quotes in the JSON snippet because it’s within plain text. Also, I must clarify that pagination applies only to JSON. I need to mention that Viewers get a 403 error for CSV since I specified that Managers only can access it. Additionally, I want to add that there’s a hard cap of 10k rows for Managers, which would return a 413 error if exceeded. Finally, I’ll include information about deterministic tie-breakers, specifically the agentId ASC tie-breaker.",
+      "response": "Confirmed goals/drivers: meet <1.5s for expected scale, deterministic/filterable results for QA, minimal complexity; flow is browser → app server → reporting RDBMS, with auth middleware setting role, controllers validating/authorizing (exports blocked for Viewers), service layer deciding includeComments=(role==Manager) and applying filters/pagination/sort, and repository running parameterized SQL (GROUP BY COUNT/AVG + window/lateral join to fetch latest comment) while omitting comment columns when includeComments=false.  \nKey endpoints/behaviors: GET /api/agents/activities?agentId=&channel=&from=&to=&page=&pageSize=&sort= (paginated JSON; pageSize default 50, max 200; pagination applies only to JSON), GET /api/agents/activities.csv?agentId=&channel=&from=&to=&sort= (CSV full filtered+sorted set, Managers only, Viewers get 403, hard cap default 10,000 rows → 413 if exceeded), GET /api/agents/{id}/activity?channel=&from=&to=&limit=5 (per-agent comment list; comment text only for Managers); allowed sort keys: totalCount, avgRating, agentName (ASC|DESC) and default sort is totalCount DESC, avgRating DESC, agentName ASC with agentId ASC always appended as the final deterministic tie-breaker; per-agent comment lists ORDER BY created_at DESC, id ASC.  \nDB schema/indexes: agents(id PK, name, team); feedback(id PK, agent_id FK, channel, rating smallint NOT NULL, comment text NULL, created_at timestamp NOT NULL); indexes: IX_feedback_agent_created(agent_id, created_at DESC, id), IX_feedback_agent_channel_created(agent_id, channel, created_at DESC), IX_feedback_channel_created(channel, created_at), IX_feedback_created(created_at); repository uses prepared statements and either ROW_NUMBER() window function or LATERAL JOIN with ORDER BY created_at DESC, id ASC to pick latest comment deterministically and avoids selecting comment text for Viewers.  \nTimestamps/CSV/security: all JSON and CSV timestamps use RFC3339/ISO‑8601 UTC with 'Z' (e.g., 2026-07-25T13:45:30.123Z); from/to are interpreted in UTC and inclusive (from <= created_at <= to); CSV headers/column order are exactly agentId,agentName,totalCount,avgRating,latestComment,latestCommentCreatedAt (latestComment and latestCommentCreatedAt omitted entirely for Viewers), and comment text must never be selected or returned for Viewers at the repository layer (defense‑in‑depth).  \nExample (Manager): GET /api/agents/activities?channel=web&from=2026-07-01T00:00:00Z&to=2026-07-31T23:59:59Z&page=1&pageSize=2&sort=totalCount:desc → JSON: [{\"agentId\":123,\"agentName\":\"Alex Kim\",\"totalCount\":254,\"avgRating\":4.6,\"latestComment\":{\"id\":9876,\"text\":\"Resolved quickly, thanks\",\"createdAt\":\"2026-07-30T11:22:33.000Z\"}},{\"agentId\":124,\"agentName\":\"R. Patel\",\"totalCount\":200,\"avgRating\":4.4,\"latestComment\":{\"id\":9933,\"text\":\"Helpful and patient\",\"createdAt\":\"2026-07-29T09:10:11.000Z\"}}]; same filters CSV (Managers) first lines: agentId,agentName,totalCount,avgRating,latestComment,latestCommentCreatedAt\\n123,Alex Kim,254,4.6,\"Resolved quickly, thanks\",2026-07-30T11:22:33.000Z\\n124,\"R. Patel\",200,4.4,\"Helpful and patient\",2026-07-29T09:10:11.000Z."
+    }
+  ],
+  "simulation_fallbacks": [],
+  "fidelity_gate": {
+    "variable_fidelity": {
+      "Task complexity": "strongly agree",
+      "Objective clarity": "strongly agree",
+      "Action authority": "strongly agree",
+      "Process constraints": "strongly agree",
+      "Requirement volatility": "strongly agree",
+      "Information completeness": "strongly agree",
+      "Stakeholder alignment": "strongly agree",
+      "Consequence severity": "agree"
+    },
+    "variable_fidelity_rationale": [
+      "Consequence severity (Strong feedback): Feedback is clearly tied to architectural quality and is more pronounced than mild/moderate commentary, but scenario penalties and rework are moderate rather than extremely harsh, so this fits \"Strong\" well but not perfectly enough to merit \"strongly agree\"."
+    ],
+    "rule_fidelity": {
+      "rules[world_update.context]": "strongly agree",
+      "rules[world_update.resource]": "strongly agree",
+      "rules[world_update.actors]": "strongly agree",
+      "rules[consequence]": "agree"
+    },
+    "rule_fidelity_rationale": [
+      "rules[consequence]: Consequences are clearly contingent on answer quality and affect later rounds (confidence, clarifications, additional constraints), matching the rule. However, the negative consequences never become very severe or strongly punitive; they remain within fairly supportive project dynamics, so this is best captured as \"agree\" rather than \"strongly agree\"."
+    ],
+    "rendering_fidelity": {
+      "thorough": "strongly agree",
+      "no-confound": "strongly agree",
+      "specificity": "strongly agree",
+      "event-centric": "strongly agree",
+      "no-meta": "strongly agree",
+      "update-freq": "strongly agree",
+      "continuity": "strongly agree"
+    },
+    "rendering_fidelity_rationale": [
+      "N/A"
+    ],
+    "overall_validity": {
+      "rating": "highly_valid",
+      "rationale": "The simulation closely adheres to the configured variable values and their linked dimensions: the task stays small and linear with few components; objectives are repeatedly grounded in a formal AAD-2.x spec; the architect clearly holds final authority; a disciplined multi-step design process is followed; requirement updates are minor and infrequent; information is rich and promptly supplied; stakeholders are consistently aligned; and feedback is strongly tied to performance, though not dramatically punitive. World update rules are respected: the architecture never expands beyond a single UI, single app server, and single reporting database; requirement refinements are localized; resources consistently elaborate the same underlying spec without contradiction; and actors (PO, EM, QA) remain coherent, reinforcing shared goals from different angles. Rendering instructions are also followed well: each round includes explicit consequence, context, resource, and actor updates; no extraneous systems or factors are introduced; events are presented through realistic meeting/dialogue rather than meta-descriptions of variables; time and narrative flow smoothly across rounds with appropriate update frequency. The only minor shortfall is that consequences, while clearly consequential and directive, are somewhat gentler than the most severe interpretation of \"Strong feedback.\" This is a small deviation that does not meaningfully contaminate the behavioral observation. Overall, the simulation provides a clean, internally consistent testbed that very closely matches the intended configuration, so any residual issues are peripheral rather than substantive."
+    }
+  },
+  "fidelity_gate_fallbacks": [],
+  "passes_fidelity_gate": true,
+  "token_usage": {
+    "total": {
+      "total_input_tokens": 81910,
+      "cached_input_tokens": 40704,
+      "total_output_tokens": 24610,
+      "reasoning_output_tokens": 7130,
+      "visible_output_tokens": 17480,
+      "total_tokens": 106520
+    },
+    "by_agent": {
+      "subject_agent": {
+        "total_input_tokens": 11457,
+        "cached_input_tokens": 5632,
+        "total_output_tokens": 7507,
+        "reasoning_output_tokens": 5120,
+        "visible_output_tokens": 2387,
+        "total_tokens": 18964
+      },
+      "simulator_agent": {
+        "total_input_tokens": 58601,
+        "cached_input_tokens": 32640,
+        "total_output_tokens": 15913,
+        "reasoning_output_tokens": 1615,
+        "visible_output_tokens": 14298,
+        "total_tokens": 74514
+      },
+      "research_manager": {
+        "total_input_tokens": 11852,
+        "cached_input_tokens": 2432,
+        "total_output_tokens": 1190,
+        "reasoning_output_tokens": 395,
+        "visible_output_tokens": 795,
+        "total_tokens": 13042
+      }
+    },
+    "calls": [
+      {
+        "agent": "subject_agent",
+        "total_input_tokens": 1056,
+        "cached_input_tokens": 0,
+        "total_output_tokens": 1402,
+        "reasoning_output_tokens": 960,
+        "visible_output_tokens": 442,
+        "total_tokens": 2458,
+        "round": 1
+      },
+      {
+        "agent": "subject_agent",
+        "total_input_tokens": 2041,
+        "cached_input_tokens": 0,
+        "total_output_tokens": 2159,
+        "reasoning_output_tokens": 1408,
+        "visible_output_tokens": 751,
+        "total_tokens": 4200,
+        "round": 2
+      },
+      {
+        "agent": "subject_agent",
+        "total_input_tokens": 3836,
+        "cached_input_tokens": 1920,
+        "total_output_tokens": 1515,
+        "reasoning_output_tokens": 1152,
+        "visible_output_tokens": 363,
+        "total_tokens": 5351,
+        "round": 3
+      },
+      {
+        "agent": "subject_agent",
+        "total_input_tokens": 4524,
+        "cached_input_tokens": 3712,
+        "total_output_tokens": 2431,
+        "reasoning_output_tokens": 1600,
+        "visible_output_tokens": 831,
+        "total_tokens": 6955,
+        "round": 4
+      },
+      {
+        "agent": "simulator_agent",
+        "total_input_tokens": 5878,
+        "cached_input_tokens": 1408,
+        "total_output_tokens": 4243,
+        "reasoning_output_tokens": 127,
+        "visible_output_tokens": 4116,
+        "total_tokens": 10121,
+        "round": 1,
+        "source": "simulation_batch",
+        "simulation_id": "simulation_006_set_2"
+      },
+      {
+        "agent": "simulator_agent",
+        "total_input_tokens": 11605,
+        "cached_input_tokens": 4352,
+        "total_output_tokens": 4500,
+        "reasoning_output_tokens": 694,
+        "visible_output_tokens": 3806,
+        "total_tokens": 16105,
+        "round": 2,
+        "source": "simulation_batch",
+        "simulation_id": "simulation_006_set_2"
+      },
+      {
+        "agent": "simulator_agent",
+        "total_input_tokens": 18298,
+        "cached_input_tokens": 10112,
+        "total_output_tokens": 3888,
+        "reasoning_output_tokens": 349,
+        "visible_output_tokens": 3539,
+        "total_tokens": 22186,
+        "round": 3,
+        "source": "simulation_batch",
+        "simulation_id": "simulation_006_set_2"
+      },
+      {
+        "agent": "simulator_agent",
+        "total_input_tokens": 22820,
+        "cached_input_tokens": 16768,
+        "total_output_tokens": 3282,
+        "reasoning_output_tokens": 445,
+        "visible_output_tokens": 2837,
+        "total_tokens": 26102,
+        "round": 4,
+        "source": "simulation_batch",
+        "simulation_id": "simulation_006_set_2"
+      },
+      {
+        "agent": "research_manager",
+        "total_input_tokens": 11852,
+        "cached_input_tokens": 2432,
+        "total_output_tokens": 1190,
+        "reasoning_output_tokens": 395,
+        "visible_output_tokens": 795,
+        "total_tokens": 13042,
+        "round": 1,
+        "stage": "research_manager"
+      }
+    ]
+  }
+}
